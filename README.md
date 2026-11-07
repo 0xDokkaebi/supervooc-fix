@@ -7,6 +7,7 @@ This repo targets the **global version** (CPH2769, 6400mAh battery). The Chinese
 ## Table of contents
 
 - [What causes it](#what-causes-it)
+- [How the fix works](#how-the-fix-works)
 - [How I found the values](#how-i-found-the-values)
 - [Disclaimer](#disclaimer)
 - [Tested on](#tested-on)
@@ -14,7 +15,6 @@ This repo targets the **global version** (CPH2769, 6400mAh battery). The Chinese
 - [Setup on Windows](#setup-on-windows)
 - [Setup on Linux / macOS](#setup-on-linux--macos)
 - [Usage (phone only, after each reboot)](#usage-phone-only-after-each-reboot)
-- [How the fix works](#how-the-fix-works)
 - [Troubleshooting](#troubleshooting)
 - [Related projects](#related-projects)
 
@@ -23,6 +23,16 @@ This repo targets the **global version** (CPH2769, 6400mAh battery). The Chinese
 The OPLUS Charger HAL V12 service reads its charging profiles from `/odm/firmware/fastchg/24877/`. It expects a file called `silicon_x25_X2_single_charging_hyper_mode_config.txt` for single-battery SUPERVOOC mode. That file was never included in any firmware build (not ColorOS 17, not OxygenOS 16). Without it, the HAL falls back to a conservative charging profile that stops fast charging at the next percentage point after you plug in.
 
 The parallel-mode config (`charging_hyper_mode_config.txt`) is present and contains the right thermal curves. The fix copies it under the missing filename and bind-mounts the directory over the read-only EROFS partition.
+
+## How the fix works
+
+1. The exploit (CVE-2026-98260, a POSIX CPU timer use-after-free) gives temporary root with full capabilities and disables SELinux
+2. `ksu_stage.sh` copies the existing parallel-mode charging config as the missing single-mode config
+3. A bind mount places the fixed directory over the EROFS read-only partition at `/odm/firmware/fastchg/24877/`
+4. The Charger HAL picks up the config on its next read and enables SUPERVOOC at full power
+5. KernelSU is loaded for additional root management
+
+The fix is temporary. A reboot clears the bind mount and the exploit's kernel modifications. Nothing is written to the system partition.
 
 ## How I found the values
 
@@ -252,16 +262,6 @@ adb shell dumpsys battery | grep "Charger voltage"
 If the first attempt fails ("selinux stage missed its race" or a kernel panic/reboot), try again. The exploit involves kernel race conditions and sometimes needs 2-3 attempts.
 
 When it succeeds, `ksu_stage.sh` runs automatically with root privileges. It applies the SUPERVOOC bind mount fix and loads KernelSU via `ksud late-load`.
-
-## How the fix works
-
-1. The exploit (CVE-2026-98260, a POSIX CPU timer use-after-free) gives temporary root with full capabilities and disables SELinux
-2. `ksu_stage.sh` copies the existing parallel-mode charging config as the missing single-mode config
-3. A bind mount places the fixed directory over the EROFS read-only partition at `/odm/firmware/fastchg/24877/`
-4. The Charger HAL picks up the config on its next read and enables SUPERVOOC at full power
-5. KernelSU is loaded for additional root management
-
-The fix is temporary. A reboot clears the bind mount and the exploit's kernel modifications. Nothing is written to the system partition.
 
 ## Troubleshooting
 
