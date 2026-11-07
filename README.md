@@ -4,11 +4,59 @@ The OnePlus 15R (CPH2769) on ColorOS 17 stops SUPERVOOC charging at whatever bat
 
 This repo targets the **global version** (CPH2769, 6400mAh battery). The Chinese equivalent is the OnePlus Ace 6T. If your device has the same battery capacity and the same missing config file, this fix should apply. If your battery config is different, do not use this.
 
+## Table of contents
+
+- [What causes it](#what-causes-it)
+- [How I found the values](#how-i-found-the-values)
+- [Disclaimer](#disclaimer)
+- [Tested on](#tested-on)
+- [Requirements](#requirements)
+- [Setup on Windows](#setup-on-windows)
+- [Setup on Linux / macOS](#setup-on-linux--macos)
+- [Usage (phone only, after each reboot)](#usage-phone-only-after-each-reboot)
+- [How the fix works](#how-the-fix-works)
+- [Troubleshooting](#troubleshooting)
+- [Related projects](#related-projects)
+
 ## What causes it
 
 The OPLUS Charger HAL V12 service reads its charging profiles from `/odm/firmware/fastchg/24877/`. It expects a file called `silicon_x25_X2_single_charging_hyper_mode_config.txt` for single-battery SUPERVOOC mode. That file was never included in any firmware build (not ColorOS 17, not OxygenOS 16). Without it, the HAL falls back to a conservative charging profile that stops fast charging at the next percentage point after you plug in.
 
 The parallel-mode config (`charging_hyper_mode_config.txt`) is present and contains the right thermal curves. The fix copies it under the missing filename and bind-mounts the directory over the read-only EROFS partition.
+
+## How I found the values
+
+### Identifying the missing config
+
+The OPLUS Charger HAL V12 service logs its config loading sequence to logcat. When the phone is plugged in and fast charging fails, filtering logcat for `oplus_chg` and `fastchg` shows the HAL scanning `/odm/firmware/fastchg/24877/` for charging profiles. It successfully loads `charging_hyper_mode_config.txt` (parallel-mode) but fails to find `silicon_x25_X2_single_charging_hyper_mode_config.txt` (single-mode). The filename tells us exactly what the HAL expects: a Silicon X25 X2 single-cell charging config in hyper mode.
+
+Listing the directory confirms it:
+```
+charging_hyper_mode_config.txt                              <-- present (parallel mode)
+silicon_x25_X2_single_charging_hyper_mode_config.txt        <-- missing (single mode)
+```
+
+The HAL tries single-mode first. When the file is missing, it does not fall back to parallel-mode. Instead it falls back to a minimal safe profile that caps charging at the next percentage point.
+
+### Why the parallel-mode config works as a replacement
+
+Both configs describe thermal curves, voltage limits, and current profiles for the same battery and charging IC (Silicon X25 X2). The difference between "parallel" and "single" refers to the charging path topology, not the battery itself. On the 15R with its single 6400mAh cell, the HAL requests single-mode but the electrical parameters (max voltage, max current per step, thermal thresholds) are identical. The parallel-mode config contains the correct values for this hardware.
+
+### Cross-validation with the OnePlus 13
+
+To make sure the config values were not aberrant, I compared them against a known-working OnePlus 13 (same OPLUS Charger HAL generation). The 13 has both config files present and fast charging works out of the box. Comparing the thermal curves and voltage profiles between the two devices:
+
+- **Voltage limits**: both devices use the same per-step voltage ceiling for their respective battery chemistries
+- **Thermal thresholds**: the temperature cutoff points follow the same pattern (progressive current reduction at 35C, 40C, 45C), with the 15R's thresholds slightly more conservative due to its larger battery
+- **Current profiles**: the max current values scale proportionally with battery capacity (the 15R's 6400mAh vs the 13's cell), confirming the curves are correctly calibrated for the hardware rather than being placeholder or debug values
+
+This cross-check confirmed that the parallel-mode config on the 15R contains production-grade values that match the expected pattern for OPLUS fast charging, and that using it as the single-mode config does not push any parameter outside safe operating range.
+
+## Disclaimer
+
+This fix involves a kernel exploit that temporarily modifies kernel memory. While the changes are cleared on reboot and nothing is written to the system partition, there is always some risk when running kernel exploits. Use at your own risk. The authors are not responsible for any damage, data loss, or other issues that may result from using this fix.
+
+This was developed and tested on the OnePlus 15R (CPH2769, global, 6400mAh) only. Other devices (including the OnePlus 15) have different hardware and firmware. If your device does not have the same battery configuration, this fix may not apply or may cause unexpected behavior. Do not use this on a device with a different battery capacity.
 
 ## Tested on
 
@@ -215,34 +263,6 @@ When it succeeds, `ksu_stage.sh` runs automatically with root privileges. It app
 
 The fix is temporary. A reboot clears the bind mount and the exploit's kernel modifications. Nothing is written to the system partition.
 
-## How we found the values
-
-### Identifying the missing config
-
-The OPLUS Charger HAL V12 service logs its config loading sequence to logcat. When the phone is plugged in and fast charging fails, filtering logcat for `oplus_chg` and `fastchg` shows the HAL scanning `/odm/firmware/fastchg/24877/` for charging profiles. It successfully loads `charging_hyper_mode_config.txt` (parallel-mode) but fails to find `silicon_x25_X2_single_charging_hyper_mode_config.txt` (single-mode). The filename tells us exactly what the HAL expects: a Silicon X25 X2 single-cell charging config in hyper mode.
-
-Listing the directory confirms it:
-```
-charging_hyper_mode_config.txt                              <-- present (parallel mode)
-silicon_x25_X2_single_charging_hyper_mode_config.txt        <-- missing (single mode)
-```
-
-The HAL tries single-mode first. When the file is missing, it does not fall back to parallel-mode. Instead it falls back to a minimal safe profile that caps charging at the next percentage point.
-
-### Why the parallel-mode config works as a replacement
-
-Both configs describe thermal curves, voltage limits, and current profiles for the same battery and charging IC (Silicon X25 X2). The difference between "parallel" and "single" refers to the charging path topology, not the battery itself. On the 15R with its single 6400mAh cell, the HAL requests single-mode but the electrical parameters (max voltage, max current per step, thermal thresholds) are identical. The parallel-mode config contains the correct values for this hardware.
-
-### Cross-validation with the OnePlus 13
-
-To make sure the config values were not aberrant, we compared them against a known-working OnePlus 13 (same OPLUS Charger HAL generation). The 13 has both config files present and fast charging works out of the box. Comparing the thermal curves and voltage profiles between the two devices:
-
-- **Voltage limits**: both devices use the same per-step voltage ceiling for their respective battery chemistries
-- **Thermal thresholds**: the temperature cutoff points follow the same pattern (progressive current reduction at 35C, 40C, 45C), with the 15R's thresholds slightly more conservative due to its larger battery
-- **Current profiles**: the max current values scale proportionally with battery capacity (the 15R's 6400mAh vs the 13's cell), confirming the curves are correctly calibrated for the hardware rather than being placeholder or debug values
-
-This cross-check confirmed that the parallel-mode config on the 15R contains production-grade values that match the expected pattern for OPLUS fast charging, and that using it as the single-mode config does not push any parameter outside safe operating range.
-
 ## Troubleshooting
 
 **TimerRoot shows "ADB permission is limited"**
@@ -259,12 +279,6 @@ Reboot and try again. Do not attempt a second run without rebooting first, as th
 
 **Shizuku stuck on "Waiting for service"**
 Start the server manually via ADB (see step 4 in your OS section above).
-
-## Disclaimer
-
-This fix involves a kernel exploit that temporarily modifies kernel memory. While the changes are cleared on reboot and nothing is written to the system partition, there is always some risk when running kernel exploits. Use at your own risk. The authors are not responsible for any damage, data loss, or other issues that may result from using this fix.
-
-This was developed and tested on the OnePlus 15R (CPH2769, global, 6400mAh) only. Other devices (including the OnePlus 15) have different hardware and firmware. If your device does not have the same battery configuration, this fix may not apply or may cause unexpected behavior. Do not use this on a device with a different battery capacity.
 
 ## Related projects
 
