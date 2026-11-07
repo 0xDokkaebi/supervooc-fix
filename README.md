@@ -23,34 +23,33 @@ This was tested on the 15R specifically. The OnePlus 15 (CPH2747) has a differen
 - [KernelSU](https://github.com/tiann/KernelSU) manager app installed
 - [Shizuku](https://github.com/RikkaApps/Shizuku) installed and running
 
-## Setup (one time, via ADB)
+---
 
-### 1. Connect via USB or WiFi
+## Setup on Windows
 
-USB:
-```
+Everything below uses **PowerShell** unless noted otherwise. You need [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) installed and `adb` in your PATH.
+
+### 1. Connect to the phone
+
+**USB:**
+```powershell
 adb devices
 ```
 
-WiFi (from the phone's developer options, wireless debugging):
-```
+**WiFi** (from the phone's developer options, wireless debugging):
+```powershell
 adb pair <IP>:<PAIRING_PORT> <CODE>
 adb connect <IP>:<DEBUG_PORT>
 ```
 
-If you connect through the phone's hotspot, the phone's IP is your default gateway, not the IP shown in the WiFi settings.
+If you connect through the phone's hotspot, the phone's IP is your default gateway, not the IP shown in the WiFi settings. Find it with:
 
-Linux/macOS:
-```
-ip route show dev wlan0 | grep default | awk '{print $3}'
-```
-
-Windows (PowerShell):
+PowerShell:
 ```powershell
 (Get-NetRoute -DestinationPrefix "0.0.0.0/0" | Where-Object { $_.InterfaceAlias -match "Wi-Fi" }).NextHop
 ```
 
-Windows (cmd):
+cmd:
 ```
 ipconfig | findstr "Default Gateway"
 ```
@@ -59,8 +58,7 @@ ipconfig | findstr "Default Gateway"
 
 ColorOS has a developer option called "System Optimization" that restricts Shizuku and ADB permissions for third-party apps. TimerRoot cannot get Shizuku access while this is enabled.
 
-Via ADB:
-```
+```powershell
 adb shell settings put global oplus_customize_system_stable_plan_switch 0
 ```
 
@@ -68,7 +66,7 @@ If you prefer the UI toggle: on some ColorOS builds this option is hidden in non
 
 ### 3. Push the fix script
 
-```
+```powershell
 adb push ksu_stage.sh /data/local/tmp/ksu_stage.sh
 adb shell chmod 444 /data/local/tmp/ksu_stage.sh
 ```
@@ -77,34 +75,125 @@ The 444 permission is important. The exploit binary tries to overwrite `ksu_stag
 
 ### 4. Start Shizuku
 
-Open the Shizuku app on the phone. If it stays stuck on "Waiting for service", start the server manually:
+Open the Shizuku app on the phone. If it stays stuck on "Waiting for service", start it from your PC:
 
-```
-adb shell sh /storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh
-```
-
-Or start it directly:
-
-Linux/macOS:
-```bash
-SHIZUKU_APK=$(adb shell pm path moe.shizuku.privileged.api | head -1 | cut -d: -f2)
-adb shell "app_process -Djava.class.path=$SHIZUKU_APK /system/bin --nice-name=shizuku_server moe.shizuku.privileged.api.ShizukuService"
-```
-
-Windows (PowerShell):
 ```powershell
 $apk = (adb shell pm path moe.shizuku.privileged.api) -replace "package:",""
 adb shell "app_process -Djava.class.path=$apk /system/bin --nice-name=shizuku_server moe.shizuku.privileged.api.ShizukuService"
 ```
 
+Or push the start script:
+```powershell
+adb shell sh /storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh
+```
+
 ### 5. Enable trace events
 
 The exploit needs kernel memory trace events active. Run this before the first attempt after each reboot:
-```
+```powershell
 adb shell "atrace --async_start -c -b 65536 memory"
 ```
 
 TimerRoot also does this through Shizuku, but running it manually from ADB is more reliable.
+
+### 6. Verify the fix
+
+After TimerRoot succeeds (see [Usage](#usage-phone-only-after-each-reboot) below), check that both config files exist:
+```powershell
+adb shell ls /odm/firmware/fastchg/24877/
+```
+Both `charging_hyper_mode_config.txt` and `silicon_x25_X2_single_charging_hyper_mode_config.txt` should be listed.
+
+Check charging voltage while plugged in:
+```powershell
+adb shell "dumpsys battery | findstr voltage"
+```
+10000 = SUPERVOOC active (10V). 5000 = standard charging (5V).
+
+---
+
+## Setup on Linux / macOS
+
+### 1. Connect to the phone
+
+**USB:**
+```bash
+adb devices
+```
+
+**WiFi** (from the phone's developer options, wireless debugging):
+```bash
+adb pair <IP>:<PAIRING_PORT> <CODE>
+adb connect <IP>:<DEBUG_PORT>
+```
+
+If you connect through the phone's hotspot, the phone's IP is your default gateway, not the IP shown in the WiFi settings. Find it with:
+```bash
+ip route show dev wlan0 | grep default | awk '{print $3}'
+```
+
+On macOS, replace `wlan0` with `en0`, or use:
+```bash
+route -n get default | awk '/gateway:/{print $2}'
+```
+
+### 2. Disable System Optimization
+
+ColorOS has a developer option called "System Optimization" that restricts Shizuku and ADB permissions for third-party apps. TimerRoot cannot get Shizuku access while this is enabled.
+
+```bash
+adb shell settings put global oplus_customize_system_stable_plan_switch 0
+```
+
+If you prefer the UI toggle: on some ColorOS builds this option is hidden in non-English languages. Switch the phone language to English temporarily, go to Developer Options, disable "System Optimization", and switch back.
+
+### 3. Push the fix script
+
+```bash
+adb push ksu_stage.sh /data/local/tmp/ksu_stage.sh
+adb shell chmod 444 /data/local/tmp/ksu_stage.sh
+```
+
+The 444 permission is important. The exploit binary tries to overwrite `ksu_stage.sh` with its own default script before executing it. Making the file read-only prevents that, so our version (with the charging fix) runs instead.
+
+### 4. Start Shizuku
+
+Open the Shizuku app on the phone. If it stays stuck on "Waiting for service", start it from your PC:
+
+```bash
+SHIZUKU_APK=$(adb shell pm path moe.shizuku.privileged.api | head -1 | cut -d: -f2)
+adb shell "app_process -Djava.class.path=$SHIZUKU_APK /system/bin --nice-name=shizuku_server moe.shizuku.privileged.api.ShizukuService"
+```
+
+Or push the start script:
+```bash
+adb shell sh /storage/emulated/0/Android/data/moe.shizuku.privileged.api/start.sh
+```
+
+### 5. Enable trace events
+
+The exploit needs kernel memory trace events active. Run this before the first attempt after each reboot:
+```bash
+adb shell "atrace --async_start -c -b 65536 memory"
+```
+
+TimerRoot also does this through Shizuku, but running it manually from ADB is more reliable.
+
+### 6. Verify the fix
+
+After TimerRoot succeeds (see [Usage](#usage-phone-only-after-each-reboot) below), check that both config files exist:
+```bash
+adb shell ls /odm/firmware/fastchg/24877/
+```
+Both `charging_hyper_mode_config.txt` and `silicon_x25_X2_single_charging_hyper_mode_config.txt` should be listed.
+
+Check charging voltage while plugged in:
+```bash
+adb shell dumpsys battery | grep "Charger voltage"
+```
+10000 = SUPERVOOC active (10V). 5000 = standard charging (5V).
+
+---
 
 ## Usage (phone only, after each reboot)
 
@@ -116,18 +205,6 @@ If the first attempt fails ("selinux stage missed its race" or a kernel panic/re
 
 When it succeeds, `ksu_stage.sh` runs automatically with root privileges. It applies the SUPERVOOC bind mount fix and loads KernelSU via `ksud late-load`.
 
-You can verify the fix is active:
-```
-adb shell ls /odm/firmware/fastchg/24877/
-```
-Both `charging_hyper_mode_config.txt` and `silicon_x25_X2_single_charging_hyper_mode_config.txt` should be listed.
-
-To check charging voltage while plugged in:
-```
-adb shell dumpsys battery | grep "Charger voltage"
-```
-10000 = SUPERVOOC active (10V). 5000 = standard charging (5V).
-
 ## How the fix works
 
 1. The exploit (CVE-2026-98260, a POSIX CPU timer use-after-free) gives temporary root with full capabilities and disables SELinux
@@ -137,6 +214,34 @@ adb shell dumpsys battery | grep "Charger voltage"
 5. KernelSU is loaded for additional root management
 
 The fix is temporary. A reboot clears the bind mount and the exploit's kernel modifications. Nothing is written to the system partition.
+
+## How we found the values
+
+### Identifying the missing config
+
+The OPLUS Charger HAL V12 service logs its config loading sequence to logcat. When the phone is plugged in and fast charging fails, filtering logcat for `oplus_chg` and `fastchg` shows the HAL scanning `/odm/firmware/fastchg/24877/` for charging profiles. It successfully loads `charging_hyper_mode_config.txt` (parallel-mode) but fails to find `silicon_x25_X2_single_charging_hyper_mode_config.txt` (single-mode). The filename tells us exactly what the HAL expects: a Silicon X25 X2 single-cell charging config in hyper mode.
+
+Listing the directory confirms it:
+```
+charging_hyper_mode_config.txt                              <-- present (parallel mode)
+silicon_x25_X2_single_charging_hyper_mode_config.txt        <-- missing (single mode)
+```
+
+The HAL tries single-mode first. When the file is missing, it does not fall back to parallel-mode. Instead it falls back to a minimal safe profile that caps charging at the next percentage point.
+
+### Why the parallel-mode config works as a replacement
+
+Both configs describe thermal curves, voltage limits, and current profiles for the same battery and charging IC (Silicon X25 X2). The difference between "parallel" and "single" refers to the charging path topology, not the battery itself. On the 15R with its single 6400mAh cell, the HAL requests single-mode but the electrical parameters (max voltage, max current per step, thermal thresholds) are identical. The parallel-mode config contains the correct values for this hardware.
+
+### Cross-validation with the OnePlus 13
+
+To make sure the config values were not aberrant, we compared them against a known-working OnePlus 13 (same OPLUS Charger HAL generation). The 13 has both config files present and fast charging works out of the box. Comparing the thermal curves and voltage profiles between the two devices:
+
+- **Voltage limits**: both devices use the same per-step voltage ceiling for their respective battery chemistries
+- **Thermal thresholds**: the temperature cutoff points follow the same pattern (progressive current reduction at 35C, 40C, 45C), with the 15R's thresholds slightly more conservative due to its larger battery
+- **Current profiles**: the max current values scale proportionally with battery capacity (the 15R's 6400mAh vs the 13's cell), confirming the curves are correctly calibrated for the hardware rather than being placeholder or debug values
+
+This cross-check confirmed that the parallel-mode config on the 15R contains production-grade values that match the expected pattern for OPLUS fast charging, and that using it as the single-mode config does not push any parameter outside safe operating range.
 
 ## Troubleshooting
 
@@ -153,7 +258,7 @@ This happens occasionally. The kernel exploit involves race conditions that can 
 Reboot and try again. Do not attempt a second run without rebooting first, as the parked exploit process from the first run interferes.
 
 **Shizuku stuck on "Waiting for service"**
-Start the server manually via ADB (see step 4 above).
+Start the server manually via ADB (see step 4 in your OS section above).
 
 ## Disclaimer
 
