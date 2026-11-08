@@ -12,6 +12,7 @@ This repo targets the **global version** (CPH2769, 6400mAh battery). The Chinese
 - [Disclaimer](#disclaimer)
 - [Tested on](#tested-on)
 - [Requirements](#requirements)
+- [Quick setup (interactive script)](#quick-setup-interactive-script)
 - [Setup on Windows](#setup-on-windows)
 - [Setup on Linux / macOS](#setup-on-linux--macos)
 - [Usage (phone only, after each reboot)](#usage-phone-only-after-each-reboot)
@@ -80,6 +81,36 @@ This was tested on the 15R specifically. The OnePlus 15 (CPH2747) has a differen
 - [TimerRoot](https://github.com/kpgc10kai/TimerRoot) (temporary root via CVE-2026-98260)
 - [KernelSU](https://github.com/tiann/KernelSU) manager app installed
 - [Shizuku](https://github.com/RikkaApps/Shizuku) installed and running
+
+---
+
+## Quick setup (interactive script)
+
+Instead of following the manual steps below, you can run the setup script. It walks you through connecting to the phone, verifying the device, and pushing the fix.
+
+**Windows:**
+```
+setup.bat
+```
+
+**Linux / macOS:**
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+The script will:
+- Ask how you want to connect (USB or WiFi) and guide you through it
+- Verify that the connected device is a OnePlus 15R (CPH2769)
+- Check if the missing config file exists, offer to back it up if it does
+- Disable System Optimization
+- Push and lock the fix script
+- Check that TimerRoot, KernelSU, and Shizuku are installed
+- Start Shizuku and enable trace events
+
+After the script finishes, follow the [Usage](#usage-phone-only-after-each-reboot) section to apply the fix.
+
+If you prefer to do everything manually, follow the steps for your OS below.
 
 ---
 
