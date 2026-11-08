@@ -13,8 +13,8 @@ This repo targets the **global version** (CPH2769, 6400mAh battery). The Chinese
 - [Tested on](#tested-on)
 - [Requirements](#requirements)
 - [Quick setup (interactive script)](#quick-setup-interactive-script)
-- [Setup on Windows](#setup-on-windows)
-- [Setup on Linux / macOS](#setup-on-linux--macos)
+- [Manual setup on Windows](#manual-setup-on-windows)
+- [Manual setup on Linux / macOS](#manual-setup-on-linux--macos)
 - [Usage (phone only, after each reboot)](#usage-phone-only-after-each-reboot)
 - [Troubleshooting](#troubleshooting)
 - [Related projects](#related-projects)
@@ -114,7 +114,7 @@ If you prefer to do everything manually, follow the steps for your OS below.
 
 ---
 
-## Setup on Windows
+## Manual setup on Windows
 
 Everything below uses **PowerShell** unless noted otherwise. You need [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) installed and `adb` in your PATH.
 
@@ -201,7 +201,7 @@ adb shell "dumpsys battery | findstr voltage"
 
 ---
 
-## Setup on Linux / macOS
+## Manual setup on Linux / macOS
 
 ### 1. Connect to the phone
 
