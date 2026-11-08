@@ -82,14 +82,96 @@ echo "  Settings > About phone > tap Build number 7 times"
 echo "  Settings > System > Developer options > USB debugging (or Wireless debugging)"
 echo ""
 
-echo "How do you want to connect?"
-echo "  1) USB cable"
-echo "  2) WiFi (wireless debugging)"
+echo "What do you want to do?"
+echo "  1) Setup via USB cable"
+echo "  2) Setup via WiFi (wireless debugging)"
+echo "  3) Verify fix status (check if SUPERVOOC is active)"
 echo ""
-printf "${CYAN}[?]${NC} Choose [1/2]: "
+printf "${CYAN}[?]${NC} Choose [1/2/3]: "
 read -r conn_choice
 
 CONN_METHOD=""
+
+if [ "$conn_choice" = "3" ]; then
+    # quick verify mode -- connect first, then jump to status check
+    header "Connect to your phone"
+    echo "  1) USB"
+    echo "  2) WiFi"
+    echo ""
+    printf "${CYAN}[?]${NC} Choose [1/2]: "
+    read -r verify_conn
+    if [ "$verify_conn" = "1" ]; then
+        info "Waiting for device..."
+        adb wait-for-device
+    else
+        printf "${CYAN}[?]${NC} Phone IP: "
+        read -r V_IP
+        printf "${CYAN}[?]${NC} Connection port: "
+        read -r V_PORT
+        adb connect "$V_IP:$V_PORT" || abort "Connection failed."
+    fi
+
+    header "SUPERVOOC fix status"
+
+    # check if config file is visible (bind mount active)
+    info "Checking if the fix is applied (bind mount active)..."
+    if adb shell "[ -f '$FASTCHG_DIR/$MISSING_CONFIG' ]" 2>/dev/null; then
+        ok "Config file is present -- bind mount is active."
+    else
+        fail "Config file is missing -- the fix is NOT applied."
+        info "Run TimerRoot > Get root shell to apply the fix."
+    fi
+
+    echo ""
+
+    # check charging status
+    info "Checking charging status..."
+    BATTERY_INFO=$(adb shell dumpsys battery 2>/dev/null)
+    LEVEL=$(echo "$BATTERY_INFO" | grep -i "level:" | awk '{print $2}' | tr -d '\r\n')
+    STATUS=$(echo "$BATTERY_INFO" | grep -i "status:" | awk '{print $2}' | tr -d '\r\n')
+    AC=$(echo "$BATTERY_INFO" | grep -i "AC powered:" | awk '{print $3}' | tr -d '\r\n')
+    USB_PWR=$(echo "$BATTERY_INFO" | grep -i "USB powered:" | awk '{print $3}' | tr -d '\r\n')
+    VOLTAGE=$(echo "$BATTERY_INFO" | grep -i "Charger voltage" | awk '{print $3}' | tr -d '\r\n')
+    TEMP=$(echo "$BATTERY_INFO" | grep -i "temperature:" | awk '{print $2}' | tr -d '\r\n')
+
+    if [ -n "$TEMP" ]; then
+        TEMP_C=$(echo "scale=1; $TEMP / 10" | bc 2>/dev/null || echo "$TEMP")
+    fi
+
+    echo ""
+    info "Battery level: ${LEVEL:-unknown}%"
+    if [ -n "$TEMP_C" ]; then
+        info "Temperature: ${TEMP_C}C"
+    fi
+
+    if [ "$AC" = "true" ] || [ "$USB_PWR" = "true" ]; then
+        ok "Charger is connected."
+
+        if [ -n "$VOLTAGE" ]; then
+            if [ "$VOLTAGE" -ge 9000 ] 2>/dev/null; then
+                printf "${GREEN}${BOLD}[+] Charger voltage: ${VOLTAGE}mV -- SUPERVOOC is active${NC}\n"
+            elif [ "$VOLTAGE" -ge 5000 ] 2>/dev/null; then
+                printf "${YELLOW}${BOLD}[!] Charger voltage: ${VOLTAGE}mV -- standard charging (5V)${NC}\n"
+                if adb shell "[ -f '$FASTCHG_DIR/$MISSING_CONFIG' ]" 2>/dev/null; then
+                    info "The fix is applied but SUPERVOOC is not active."
+                    info "This can happen if the battery is nearly full or the phone is hot."
+                else
+                    warn "The fix is not applied. Run TimerRoot > Get root shell first."
+                fi
+            else
+                info "Charger voltage: ${VOLTAGE}mV"
+            fi
+        else
+            warn "Could not read charger voltage."
+        fi
+    else
+        warn "No charger connected. Plug in your SUPERVOOC charger to check voltage."
+        info "Once plugged in, run this check again."
+    fi
+
+    echo ""
+    exit 0
+fi
 
 case "$conn_choice" in
     1)
@@ -151,7 +233,7 @@ case "$conn_choice" in
         ok "Connected via WiFi"
         ;;
     *)
-        abort "Invalid choice."
+        abort "Invalid choice. Pick 1, 2, or 3."
         ;;
 esac
 

@@ -49,17 +49,125 @@ echo Make sure USB debugging (or Wireless debugging) is enabled on your phone:
 echo   Settings ^> About phone ^> tap Build number 7 times
 echo   Settings ^> System ^> Developer options ^> USB debugging (or Wireless debugging)
 echo.
-echo How do you want to connect?
-echo   1) USB cable
-echo   2) WiFi (wireless debugging)
+echo What do you want to do?
+echo   1) Setup via USB cable
+echo   2) Setup via WiFi (wireless debugging)
+echo   3) Verify fix status (check if SUPERVOOC is active)
 echo.
-choice /c 12 /n /m "[?] Choose [1/2]: "
+choice /c 123 /n /m "[?] Choose [1/2/3]: "
 set "CONN=%errorlevel%"
 
 if "%CONN%"=="1" goto :usb_connect
 if "%CONN%"=="2" goto :wifi_connect
+if "%CONN%"=="3" goto :verify_status
 goto :eof
 
+:verify_status
+echo.
+echo === Connect to your phone ===
+echo.
+echo   1) USB
+echo   2) WiFi
+echo.
+choice /c 12 /n /m "[?] Choose [1/2]: "
+set "VCONN=%errorlevel%"
+
+if "%VCONN%"=="1" (
+    echo.
+    echo [*] Waiting for device...
+    adb wait-for-device
+) else (
+    echo.
+    set /p "V_IP=[?] Phone IP: "
+    set /p "V_PORT=[?] Connection port: "
+    echo.
+    echo [*] Connecting to !V_IP!:!V_PORT!...
+    adb connect !V_IP!:!V_PORT!
+    if !errorlevel! neq 0 (
+        echo [-] Connection failed.
+        pause
+        exit /b 1
+    )
+)
+
+echo.
+echo === SUPERVOOC fix status ===
+echo.
+echo [*] Checking if the fix is applied (bind mount active)...
+
+adb shell "[ -f '%FASTCHG_DIR%/%MISSING_CONFIG%' ] && echo EXISTS || echo MISSING" > "%TEMP%\sv_status.txt" 2>nul
+set /p "FIX_STATUS=" < "%TEMP%\sv_status.txt"
+del "%TEMP%\sv_status.txt" >nul 2>&1
+
+echo !FIX_STATUS! | findstr /i "EXISTS" >nul 2>&1
+if !errorlevel! equ 0 (
+    echo [+] Config file is present -- bind mount is active.
+) else (
+    echo [-] Config file is missing -- the fix is NOT applied.
+    echo [*] Run TimerRoot ^> Get root shell to apply the fix.
+)
+
+echo.
+echo [*] Checking charging status...
+
+for /f "tokens=*" %%a in ('adb shell "dumpsys battery" 2^>nul') do (
+    echo %%a | findstr /i "level:" >nul 2>&1 && for /f "tokens=2" %%b in ("%%a") do set "BAT_LEVEL=%%b"
+    echo %%a | findstr /i "AC powered:" >nul 2>&1 && for /f "tokens=3" %%b in ("%%a") do set "BAT_AC=%%b"
+    echo %%a | findstr /i "USB powered:" >nul 2>&1 && for /f "tokens=3" %%b in ("%%a") do set "BAT_USB=%%b"
+    echo %%a | findstr /i "Charger voltage" >nul 2>&1 && for /f "tokens=3" %%b in ("%%a") do set "BAT_VOLT=%%b"
+    echo %%a | findstr /i "temperature:" >nul 2>&1 && for /f "tokens=2" %%b in ("%%a") do set "BAT_TEMP=%%b"
+)
+
+echo.
+if defined BAT_LEVEL echo [*] Battery level: !BAT_LEVEL!%%
+if defined BAT_TEMP echo [*] Temperature: !BAT_TEMP! (x10 C)
+
+if "!BAT_AC!"=="true" goto :charger_on
+if "!BAT_USB!"=="true" goto :charger_on
+
+echo.
+echo [!] No charger connected. Plug in your SUPERVOOC charger to check voltage.
+echo [*] Once plugged in, run this check again.
+echo.
+pause
+exit /b 0
+
+:charger_on
+echo [+] Charger is connected.
+
+if not defined BAT_VOLT (
+    echo [!] Could not read charger voltage.
+    echo.
+    pause
+    exit /b 0
+)
+
+set /a "VOLT_CHECK=!BAT_VOLT!" 2>nul
+if !VOLT_CHECK! geq 9000 (
+    echo.
+    echo [+] Charger voltage: !BAT_VOLT!mV -- SUPERVOOC is active
+) else if !VOLT_CHECK! geq 5000 (
+    echo.
+    echo [!] Charger voltage: !BAT_VOLT!mV -- standard charging (5V)
+    adb shell "[ -f '%FASTCHG_DIR%/%MISSING_CONFIG%' ] && echo EXISTS || echo MISSING" > "%TEMP%\sv_status2.txt" 2>nul
+    set /p "FIX2=" < "%TEMP%\sv_status2.txt"
+    del "%TEMP%\sv_status2.txt" >nul 2>&1
+    echo !FIX2! | findstr /i "EXISTS" >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [*] The fix is applied but SUPERVOOC is not active.
+        echo [*] This can happen if the battery is nearly full or the phone is hot.
+    ) else (
+        echo [!] The fix is not applied. Run TimerRoot ^> Get root shell first.
+    )
+) else (
+    echo [*] Charger voltage: !BAT_VOLT!mV
+)
+
+echo.
+pause
+exit /b 0
+
+:: ----------------------------------------------------------------
 :usb_connect
 echo.
 echo [*] Connect your phone via USB cable, then unlock it and tap 'Allow' on the
